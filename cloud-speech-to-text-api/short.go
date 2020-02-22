@@ -17,37 +17,67 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
-
-	client, err := speech.NewClient(ctx)
-	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
-	}
-
 	filename := "short.ogg"
-
-	data, err := ioutil.ReadFile(filename)
+	audioData, err := readFile(filename)
 	if err != nil {
 		log.Fatalf("Failed to read file: %v", err)
 	}
 
-	resp, err := client.Recognize(ctx, &speechpb.RecognizeRequest{
-		Config: &speechpb.RecognitionConfig{
-			Encoding:        speechpb.RecognitionConfig_OGG_OPUS,
-			SampleRateHertz: 48000,
-			LanguageCode:    "ja-JP",
-		},
-		Audio: &speechpb.RecognitionAudio{
-			AudioSource: &speechpb.RecognitionAudio_Content{Content: data},
-		},
-	})
+	ctx := context.Background()
+	encoding := speechpb.RecognitionConfig_OGG_OPUS
+	var sampleRateHertz int32 = 48000
+	languageCode := "ja-JP"
+	textList, err := createText(ctx, audioData, encoding, sampleRateHertz, languageCode)
+
+	for _, item := range textList {
+		fmt.Printf("\"%v\" (confidence=%3f)\n", item.text, item.confidence)
+	}
+}
+
+type speechtotextResult struct {
+	text       string
+	confidence float32
+}
+
+// createText は音声データから文字列を生成します
+// encoding https://godoc.org/google.golang.org/genproto/googleapis/cloud/speech/v1#RecognitionConfig_AudioEncoding
+func createText(context context.Context, audioData []byte, encoding speechpb.RecognitionConfig_AudioEncoding, sampleRateHertz int32, languageCode string) ([]speechtotextResult, error) {
+	client, err := speech.NewClient(context)
 	if err != nil {
-		log.Fatalf("failed to recognize: %v", err)
+		return nil, err
 	}
 
-	for _, result := range resp.Results {
+	request := &speechpb.RecognizeRequest{
+		Config: &speechpb.RecognitionConfig{
+			Encoding:        encoding,
+			SampleRateHertz: sampleRateHertz,
+			LanguageCode:    languageCode,
+		},
+		Audio: &speechpb.RecognitionAudio{
+			AudioSource: &speechpb.RecognitionAudio_Content{Content: audioData},
+		},
+	}
+
+	response, err := client.Recognize(context, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var rtn = make([]speechtotextResult, 0)
+	for _, result := range response.Results {
 		for _, alt := range result.Alternatives {
-			fmt.Printf("\"%v\" (confidence=%3f)\n", alt.Transcript, alt.Confidence)
+			item := speechtotextResult{
+				text:       alt.Transcript,
+				confidence: alt.Confidence,
+			}
+			rtn = append(rtn, item)
 		}
 	}
+
+	return rtn, nil
+}
+
+func readFile(filename string) ([]byte, error) {
+	data, err := ioutil.ReadFile(filename)
+	return data, err
 }
